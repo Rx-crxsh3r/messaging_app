@@ -89,22 +89,35 @@ io.on('connection', (socket) => {
     // Handle user authentication
     socket.on('authenticate', async (userData) => {
         try {
-            const { userId, username, avatar } = userData;
+            console.log('🔐 Authentication request received:', JSON.stringify(userData, null, 2));
+            
+            // Handle different possible field names from C# client
+            const userId = userData.userId || userData.Id || userData.id;
+            const username = userData.username || userData.Username;
+            const avatar = userData.avatar || userData.Avatar || '👤';
+            
+            console.log(`📝 Parsed data: userId=${userId}, username=${username}, avatar=${avatar}`);
+
+            if (!userId || !username) {
+                console.error('❌ Missing required authentication data');
+                socket.emit('auth_error', { message: 'Missing userId or username' });
+                return;
+            }
             
             // Store user info in socket and memory
-            socket.userId = userId;
+            socket.userId = parseInt(userId);
             socket.username = username;
             socket.avatar = avatar;
             
             const user = {
-                id: userId,
+                id: parseInt(userId),
                 username: username,
                 avatar: avatar,
                 status: 'Online',
                 socketId: socket.id
             };
 
-            connectedUsers.set(userId, user);
+            connectedUsers.set(parseInt(userId), user);
 
             // If database is available, update user status
             if (db) {
@@ -143,16 +156,31 @@ io.on('connection', (socket) => {
     // Handle message sending
     socket.on('send_message', async (messageData) => {
         try {
-            const { senderId, senderName, receiverId, content, timestamp } = messageData;
+            console.log('💬 Message data received:', JSON.stringify(messageData, null, 2));
+            
+            // Handle different possible field names from C# client
+            const senderId = messageData.senderId || messageData.SenderId;
+            const senderName = messageData.senderName || messageData.SenderName;
+            const receiverId = messageData.receiverId || messageData.ReceiverId;
+            const content = messageData.content || messageData.Content;
+            const timestamp = messageData.timestamp || messageData.Timestamp || new Date().toISOString();
+
+            console.log(`📨 Parsed message: from ${senderName}(${senderId}) to ${receiverId}: ${content}`);
+
+            if (!senderId || !receiverId || !content) {
+                console.error('❌ Missing required message data');
+                socket.emit('message_error', { message: 'Missing required message fields' });
+                return;
+            }
 
             // Store message in memory
             const message = {
                 id: messages.length + 1,
-                senderId,
+                senderId: parseInt(senderId),
                 senderName,
-                receiverId,
+                receiverId: parseInt(receiverId),
                 content,
-                timestamp: timestamp || new Date().toISOString()
+                timestamp
             };
             messages.push(message);
 
@@ -169,28 +197,45 @@ io.on('connection', (socket) => {
             }
 
             // Find the receiver's socket
-            const receiver = Array.from(connectedUsers.values()).find(u => u.id === receiverId);
+            const receiver = Array.from(connectedUsers.values()).find(u => u.id === parseInt(receiverId));
             if (receiver) {
                 const receiverSocket = io.sockets.sockets.get(receiver.socketId);
                 if (receiverSocket) {
                     receiverSocket.emit('message', message);
+                    console.log(`✅ Message delivered to ${receiver.username}`);
+                } else {
+                    console.log(`⚠️ Receiver socket not found for ${receiver.username}`);
                 }
+            } else {
+                console.log(`⚠️ Receiver not found: ${receiverId}`);
             }
 
-            console.log(`Message from ${senderName} to user ${receiverId}: ${content}`);
+            console.log(`📬 Message processed: ${senderName} → ${receiverId}`);
         } catch (error) {
-            console.error('Error sending message:', error);
-            socket.emit('error', { message: 'Failed to send message' });
+            console.error('❌ Error sending message:', error);
+            socket.emit('message_error', { message: 'Failed to send message' });
         }
     });
 
     // Handle status changes
     socket.on('change_status', async (statusData) => {
         try {
-            const { userId, status } = statusData;
+            console.log('🔄 Status change data received:', JSON.stringify(statusData, null, 2));
             
-            if (connectedUsers.has(userId)) {
-                connectedUsers.get(userId).status = status;
+            // Handle different possible field names from C# client
+            const userId = statusData.userId || statusData.UserId;
+            const status = statusData.status || statusData.Status;
+            
+            console.log(`🟢 Status change: userId=${userId}, status=${status}`);
+
+            if (!userId || !status) {
+                console.error('❌ Missing required status data');
+                socket.emit('status_error', { message: 'Missing userId or status' });
+                return;
+            }
+            
+            if (connectedUsers.has(parseInt(userId))) {
+                connectedUsers.get(parseInt(userId)).status = status;
 
                 // Update database if available
                 if (db) {
@@ -288,11 +333,19 @@ app.get('/api/messages/:userId1/:userId2', async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 initDatabase().then(() => {
-    server.listen(PORT, () => {
-        console.log(`🚀 Messaging server running on port ${PORT}`);
-        console.log(`📡 Socket.IO server ready for connections`);
-        console.log(`🗄️  Database: ${db ? 'Connected to MySQL' : 'Running in demo mode'}`);
-        console.log(`\n💡 To connect your C# app, make sure the server URL is: http://localhost:${PORT}`);
+    server.listen(PORT, '0.0.0.0', () => {
+        console.log('🚀 Messaging App Server Started Successfully!');
+        console.log('─'.repeat(50));
+        console.log(`📡 Socket.IO Server: http://0.0.0.0:${PORT}`);
+        console.log(`🗄️  Database Status: ${db ? '✅ Connected to MySQL' : '⚠️  Running in demo mode'}`);
+        console.log(`🔗 Database Config: ${dbConfig.host}:${dbConfig.port}/${dbConfig.database}`);
+        console.log('─'.repeat(50));
+        console.log('📋 Connection Instructions:');
+        console.log(`   1. Ensure C# client connects to: http://192.168.0.117:${PORT}`);
+        console.log('   2. Check firewall allows port 3000');
+        console.log('   3. Use test accounts: alice_wonder, bob_builder, etc.');
+        console.log('─'.repeat(50));
+        console.log('🟢 Server Status: READY - Waiting for client connections...');
     });
 });
 
